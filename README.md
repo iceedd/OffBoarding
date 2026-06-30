@@ -34,38 +34,53 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser
 
 ## Usage
 
-### Dry run (no changes made)
+### Interactive menu (recommended for helpdesk)
 
 ```powershell
-.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com -WhatIf
+.\Start-OffboardingMenu.ps1
 ```
 
-### Standard offboard
+Walks through 4 screens:
+
+1. **User details** — UPN, client name, tenant, IT email
+2. **Manager & mail** — whether to forward, manager email override
+3. **Step selection** — toggle each of the 6 steps on or off with number keys
+4. **Confirm & execute** — review everything, then choose dry run or live
+
+No parameters needed — everything is prompted interactively.
+
+---
+
+### Command-line (for scripting / automation)
+
+#### Dry run (no changes made)
 
 ```powershell
-.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com
+.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com -WhatIf
 ```
 
-### Offboard and forward mail to manager
+#### Full offboard for a client tenant
 
 ```powershell
-.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com -ForwardToManager
-```
-
-The manager is resolved automatically from Entra ID. Use `-ManagerEmail` to override:
-
-```powershell
-.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com `
+.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com `
     -ForwardToManager `
-    -ManagerEmail ceo@2x.com
+    -CompanyName "Client A Ltd" `
+    -ITContactEmail "helpdesk@clientA.com"
 ```
 
-### Skip specific steps
-
-Useful when re-running after a partial failure:
+#### Skip the tenant picker (go straight to a specific tenant's login)
 
 ```powershell
-.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com -SkipSteps @(2, 3)
+.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com `
+    -TenantId "clientA.onmicrosoft.com" `
+    -CompanyName "Client A Ltd" `
+    -ITContactEmail "helpdesk@clientA.com"
+```
+
+#### Skip specific steps (e.g. when re-running after a partial failure)
+
+```powershell
+.\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com -SkipSteps @(2, 3)
 ```
 
 ---
@@ -74,7 +89,8 @@ Useful when re-running after a partial failure:
 
 ```
 OffBoarding/
-├── Invoke-UserOffboarding.ps1      # Main entry point
+├── Start-OffboardingMenu.ps1       # Interactive menu — start here
+├── Invoke-UserOffboarding.ps1      # Direct command-line entry point
 ├── Modules/
 │   └── OffboardingHelpers.psm1    # Step functions and logging
 ├── Config/
