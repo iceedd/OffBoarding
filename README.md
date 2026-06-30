@@ -1,4 +1,4 @@
-# 2X User Offboarding Automation
+# User Offboarding Automation
 
 PowerShell automation for secure, consistent, and complete M365 user offboarding.
 
