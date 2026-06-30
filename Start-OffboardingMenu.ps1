@@ -155,40 +155,7 @@ if (-not $correct) {
     exit 0
 }
 
-# ── Section 1: User details ───────────────────────────────────────────────────
-
-Write-Header "SECTION 1 of 3 — USER DETAILS"
-
-$upn         = Read-ValidEmail -Prompt "User to offboard (UPN)" -Required
-$companyName = Read-Input      -Prompt "Client / company name (used in Out-of-Office messages)"
-
-# ── Section 2: Manager & mail ─────────────────────────────────────────────────
-
-Write-Header "SECTION 2 of 3 — MANAGER & MAIL SETTINGS"
-
-Write-Host "  The manager is looked up automatically from Entra ID." -ForegroundColor Gray
-Write-Host "  You can override this or leave blank to auto-resolve." -ForegroundColor Gray
-Write-Host ""
-
-$forwardToManager = Read-YesNo      -Prompt "Forward incoming mail to the user's manager?" -Default $true
-$managerEmail     = ''
-if ($forwardToManager) {
-    $managerEmail = Read-ValidEmail -Prompt "Manager email override (optional — press Enter to auto-resolve)"
-}
-
-# ── Section 3: Step selection ─────────────────────────────────────────────────
-
-Write-Header "SECTION 3 of 3 — SELECT STEPS TO RUN"
-
-Write-Host "  Type a step number to toggle it on or off." -ForegroundColor Gray
-Write-Host "  Press Enter when your selection is ready." -ForegroundColor Gray
-Write-Host ""
-
-# All steps enabled by default — string keys throughout
-$selectedSteps = [ordered]@{}
-foreach ($key in $StepDefinitions.Keys) {
-    $selectedSteps.Add($key, $true)
-}
+# ── Step menu helper (defined once, outside the loop) ─────────────────────────
 
 function Show-StepMenu {
     param(
@@ -204,106 +171,144 @@ function Show-StepMenu {
     Write-Host "  Enter a step number to toggle, or press Enter to continue: " -NoNewline -ForegroundColor White
 }
 
-while ($true) {
-    Show-StepMenu -Steps $StepDefinitions -Selected $selectedSteps
-    $input = $Host.UI.ReadLine().Trim()
-
-    if ([string]::IsNullOrWhiteSpace($input)) { break }
-
-    if ($input -match '^\d+$' -and $StepDefinitions.Contains($input)) {
-        $selectedSteps[$input] = -not $selectedSteps[$input]
-        # Clear the menu lines and redraw
-        $linesToClear = $StepDefinitions.Count + 2
-        for ($i = 0; $i -lt $linesToClear; $i++) {
-            [Console]::SetCursorPosition(0, [Console]::CursorTop - 1)
-            Write-Host (' ' * [Console]::WindowWidth)
-            [Console]::SetCursorPosition(0, [Console]::CursorTop - 1)
-        }
-    }
-    else {
-        Write-Host "  Invalid — enter a number between 1 and 6, or press Enter to continue." -ForegroundColor Red
-    }
-}
-
-$enabledSteps  = @($selectedSteps.Keys | Where-Object { $selectedSteps[$_] })
-$disabledSteps = @($selectedSteps.Keys | Where-Object { -not $selectedSteps[$_] })
-
-if ($enabledSteps.Count -eq 0) {
-    Write-Host ""
-    Write-Host "  No steps selected — nothing to do. Exiting." -ForegroundColor Yellow
-    exit 0
-}
-
-# ── Confirm ───────────────────────────────────────────────────────────────────
-
-Write-Host ""
-Write-Host "  ══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  CONFIRM — Review before executing" -ForegroundColor Cyan
-Write-Host "  ══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Tenant        : $($mgContext.TenantId)" -ForegroundColor White
-Write-Host "  Account       : $($mgContext.Account)" -ForegroundColor White
-Write-Host "  User          : $upn" -ForegroundColor White
-Write-Host "  Client        : $(if ($companyName) { $companyName } else { '(not set)' })" -ForegroundColor White
-Write-Host "  Mail Forward  : $(if ($forwardToManager) { "Yes$(if ($managerEmail) { " → $managerEmail" } else { ' (auto-resolve manager)' })" } else { 'No' })" -ForegroundColor White
-Write-Host ""
-Write-Host "  Steps to run:" -ForegroundColor White
-foreach ($n in $enabledSteps) {
-    Write-Host "    [X] $n. $($StepDefinitions[$n])" -ForegroundColor Green
-}
-foreach ($n in $disabledSteps) {
-    Write-Host "    [ ] $n. $($StepDefinitions[$n])" -ForegroundColor DarkGray
-}
-
-Write-Host ""
-Write-Host "  What would you like to do?" -ForegroundColor Yellow
-Write-Host "    1. Dry run  — preview all actions, make NO changes" -ForegroundColor Cyan
-Write-Host "    2. Execute  — run live now" -ForegroundColor Green
-Write-Host "    3. Cancel   — exit without doing anything" -ForegroundColor DarkGray
-Write-Host ""
-
-$choice = ''
-while ($choice -notin @('1', '2', '3')) {
-    Write-Host "  Enter 1, 2, or 3 : " -NoNewline -ForegroundColor White
-    $choice = $Host.UI.ReadLine().Trim()
-}
-
-if ($choice -eq '3') {
-    Write-Host ""
-    Write-Host "  Cancelled. No changes made." -ForegroundColor Yellow
-    Write-Host ""
-    exit 0
-}
-
-$isWhatIf    = ($choice -eq '1')
-$skippedNums = @($disabledSteps | ForEach-Object { [int]$_ })
-
-# ── Call main script ──────────────────────────────────────────────────────────
-
 $scriptPath = Join-Path $scriptRoot 'Invoke-UserOffboarding.ps1'
 if (-not (Test-Path $scriptPath)) {
-    Write-Host ""
     Write-Host "  ERROR: Invoke-UserOffboarding.ps1 not found." -ForegroundColor Red
     exit 1
 }
 
-$params = @{
-    UserPrincipalName = $upn
-    ForwardToManager  = $forwardToManager
-    SkipConnect       = $true   # Already connected above — don't prompt again
+# ── Main loop — stays in the same tenant session until the user quits ──────────
+
+while ($true) {
+
+    # ── Section 1: User details ───────────────────────────────────────────────
+
+    Write-Header "USER DETAILS"
+
+    $upn         = Read-ValidEmail -Prompt "User to offboard (UPN)" -Required
+    $companyName = Read-Input      -Prompt "Client / company name (used in Out-of-Office messages)"
+
+    # ── Section 2: Manager & mail ─────────────────────────────────────────────
+
+    Write-Header "MANAGER & MAIL SETTINGS"
+
+    Write-Host "  The manager is looked up automatically from Entra ID." -ForegroundColor Gray
+    Write-Host "  You can override this or leave blank to auto-resolve." -ForegroundColor Gray
+    Write-Host ""
+
+    $forwardToManager = Read-YesNo      -Prompt "Forward incoming mail to the user's manager?" -Default $true
+    $managerEmail     = ''
+    if ($forwardToManager) {
+        $managerEmail = Read-ValidEmail -Prompt "Manager email override (optional — press Enter to auto-resolve)"
+    }
+
+    # ── Section 3: Step selection ─────────────────────────────────────────────
+
+    Write-Header "SELECT STEPS TO RUN"
+
+    Write-Host "  Type a step number to toggle it on or off." -ForegroundColor Gray
+    Write-Host "  Press Enter when your selection is ready." -ForegroundColor Gray
+    Write-Host ""
+
+    $selectedSteps = [ordered]@{}
+    foreach ($key in $StepDefinitions.Keys) { $selectedSteps.Add($key, $true) }
+
+    while ($true) {
+        Show-StepMenu -Steps $StepDefinitions -Selected $selectedSteps
+        $toggleInput = $Host.UI.ReadLine().Trim()
+
+        if ([string]::IsNullOrWhiteSpace($toggleInput)) { break }
+
+        if ($toggleInput -match '^\d+$' -and $StepDefinitions.Contains($toggleInput)) {
+            $selectedSteps[$toggleInput] = -not $selectedSteps[$toggleInput]
+            $linesToClear = $StepDefinitions.Count + 2
+            for ($i = 0; $i -lt $linesToClear; $i++) {
+                [Console]::SetCursorPosition(0, [Console]::CursorTop - 1)
+                Write-Host (' ' * [Console]::WindowWidth)
+                [Console]::SetCursorPosition(0, [Console]::CursorTop - 1)
+            }
+        }
+        else {
+            Write-Host "  Invalid — enter a number between 1 and 6, or press Enter to continue." -ForegroundColor Red
+        }
+    }
+
+    $enabledSteps  = @($selectedSteps.Keys | Where-Object { $selectedSteps[$_] })
+    $disabledSteps = @($selectedSteps.Keys | Where-Object { -not $selectedSteps[$_] })
+
+    if ($enabledSteps.Count -eq 0) {
+        Write-Host ""
+        Write-Host "  No steps selected — skipping this user." -ForegroundColor Yellow
+        Write-Host ""
+    }
+    else {
+        # ── Confirm ───────────────────────────────────────────────────────────
+
+        Write-Host ""
+        Write-Host "  ══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host "  CONFIRM — Review before executing" -ForegroundColor Cyan
+        Write-Host "  ══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Tenant        : $($mgContext.TenantId)" -ForegroundColor White
+        Write-Host "  Account       : $($mgContext.Account)" -ForegroundColor White
+        Write-Host "  User          : $upn" -ForegroundColor White
+        Write-Host "  Client        : $(if ($companyName) { $companyName } else { '(not set)' })" -ForegroundColor White
+        Write-Host "  Mail Forward  : $(if ($forwardToManager) { "Yes$(if ($managerEmail) { " → $managerEmail" } else { ' (auto-resolve manager)' })" } else { 'No' })" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Steps to run:" -ForegroundColor White
+        foreach ($n in $enabledSteps)  { Write-Host "    [X] $n. $($StepDefinitions[$n])" -ForegroundColor Green   }
+        foreach ($n in $disabledSteps) { Write-Host "    [ ] $n. $($StepDefinitions[$n])" -ForegroundColor DarkGray }
+
+        Write-Host ""
+        Write-Host "  What would you like to do?" -ForegroundColor Yellow
+        Write-Host "    1. Dry run  — preview all actions, make NO changes" -ForegroundColor Cyan
+        Write-Host "    2. Execute  — run live now" -ForegroundColor Green
+        Write-Host "    3. Cancel   — skip this user and return to menu" -ForegroundColor DarkGray
+        Write-Host ""
+
+        $choice = ''
+        while ($choice -notin @('1', '2', '3')) {
+            Write-Host "  Enter 1, 2, or 3 : " -NoNewline -ForegroundColor White
+            $choice = $Host.UI.ReadLine().Trim()
+        }
+
+        if ($choice -ne '3') {
+            $isWhatIf    = ($choice -eq '1')
+            $skippedNums = @($disabledSteps | ForEach-Object { [int]$_ })
+
+            $params = @{
+                UserPrincipalName = $upn
+                ForwardToManager  = $forwardToManager
+                SkipConnect       = $true
+            }
+            if ($companyName)             { $params['CompanyName']  = $companyName  }
+            if ($managerEmail)            { $params['ManagerEmail'] = $managerEmail }
+            if ($skippedNums.Count -gt 0) { $params['SkipSteps']   = $skippedNums  }
+            if ($isWhatIf)                { $params['WhatIf']       = $true         }
+
+            Write-Host ""
+            if ($isWhatIf) {
+                Write-Host "  ── DRY RUN — no changes will be made ─────────────────────" -ForegroundColor Cyan
+            } else {
+                Write-Host "  ── EXECUTING ───────────────────────────────────────────────" -ForegroundColor Green
+            }
+            Write-Host ""
+
+            & $scriptPath @params
+        }
+    }
+
+    # ── Prompt: another user or quit ──────────────────────────────────────────
+
+    Write-Host ""
+    Write-Host "  ══════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+    $another = Read-YesNo -Prompt "Offboard another user in this tenant?" -Default $true
+    if (-not $another) {
+        Write-Host ""
+        Write-Host "  Disconnecting and exiting. Goodbye." -ForegroundColor Gray
+        Write-Host ""
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+        break
+    }
 }
-
-if ($companyName)          { $params['CompanyName']  = $companyName  }
-if ($managerEmail)         { $params['ManagerEmail'] = $managerEmail }
-if ($skippedNums.Count -gt 0) { $params['SkipSteps']  = $skippedNums }
-if ($isWhatIf)             { $params['WhatIf']       = $true         }
-
-Write-Host ""
-if ($isWhatIf) {
-    Write-Host "  ── DRY RUN — no changes will be made ─────────────────────" -ForegroundColor Cyan
-} else {
-    Write-Host "  ── EXECUTING ───────────────────────────────────────────────" -ForegroundColor Green
-}
-Write-Host ""
-
-& $scriptPath @params
