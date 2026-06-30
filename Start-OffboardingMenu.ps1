@@ -155,6 +155,17 @@ if (-not $correct) {
     exit 0
 }
 
+# Resolve the tenant's primary (default) domain for UPN auto-completion
+$tenantDomain = ''
+try {
+    $defaultDomain = Get-MgDomain -Filter "isDefault eq true" -ErrorAction Stop |
+                     Select-Object -First 1
+    if ($defaultDomain) { $tenantDomain = $defaultDomain.Id }
+}
+catch {
+    # Non-fatal — fall back to full UPN prompt
+}
+
 # ── Step menu helper (defined once, outside the loop) ─────────────────────────
 
 function Show-StepMenu {
@@ -185,8 +196,16 @@ while ($true) {
 
     Write-Header "USER DETAILS"
 
-    $upn         = Read-ValidEmail -Prompt "User to offboard (UPN)" -Required
-    $companyName = Read-Input      -Prompt "Client / company name (used in Out-of-Office messages)"
+    if ($tenantDomain) {
+        Write-Host "  Tenant domain   : @$tenantDomain" -ForegroundColor DarkGray
+        Write-Host "  Enter the username prefix only, or the full UPN to override." -ForegroundColor DarkGray
+        Write-Host ""
+        $upnInput = Read-Input -Prompt "Username (or full UPN)" -Required
+        $upn = if ($upnInput -match '@') { $upnInput.Trim() } else { "$($upnInput.Trim())@$tenantDomain" }
+    } else {
+        $upn = Read-ValidEmail -Prompt "User to offboard (UPN)" -Required
+    }
+    $companyName = Read-Input -Prompt "Client / company name (used in Out-of-Office messages)"
 
     # ── Section 2: Manager & mail ─────────────────────────────────────────────
 
