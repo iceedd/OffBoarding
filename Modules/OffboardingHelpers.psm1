@@ -111,8 +111,8 @@ function Connect-OffboardingServices {
 }
 
 function Disconnect-OffboardingServices {
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
-    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+    try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
     Write-OffboardingLog -Message "Disconnected from all services." -Level INFO
 }
 
@@ -258,14 +258,14 @@ function Remove-UserLicenses {
     Write-OffboardingLog -Message "STEP 4 — Removing M365 licenses for $($User.UserPrincipalName)" -Level STEP
 
     try {
-        $licenses = Get-MgUserLicenseDetail -UserId $User.Id -ErrorAction Stop
+        $licenses = @(Get-MgUserLicenseDetail -UserId $User.Id -ErrorAction Stop)
     }
     catch {
         Write-OffboardingLog -Message "Failed to retrieve licenses: $_" -Level ERROR
         return
     }
 
-    if (-not $licenses -or $licenses.Count -eq 0) {
+    if ($licenses.Count -eq 0) {
         Write-OffboardingLog -Message "No licenses assigned — nothing to remove." -Level INFO
         return
     }
@@ -303,9 +303,9 @@ function Remove-UserDevices {
 
     # ── Intune managed devices ────────────────────────────────────────────────
     try {
-        $intuneDevices = Get-MgDeviceManagementManagedDevice `
+        $intuneDevices = @(Get-MgDeviceManagementManagedDevice `
             -Filter "userPrincipalName eq '$($User.UserPrincipalName)'" `
-            -ErrorAction Stop
+            -ErrorAction Stop)
 
         if ($intuneDevices.Count -gt 0) {
             Write-OffboardingLog -Message "Found $($intuneDevices.Count) Intune managed device(s)." -Level INFO
@@ -334,7 +334,7 @@ function Remove-UserDevices {
 
     # ── Entra ID registered devices ───────────────────────────────────────────
     try {
-        $entraDevices = Get-MgUserRegisteredDevice -UserId $User.Id -ErrorAction Stop
+        $entraDevices = @(Get-MgUserRegisteredDevice -UserId $User.Id -ErrorAction Stop)
 
         if ($entraDevices.Count -gt 0) {
             Write-OffboardingLog -Message "Found $($entraDevices.Count) Entra ID registered device(s)." -Level INFO
@@ -363,8 +363,8 @@ function Remove-UserDevices {
 
     # ── AutoPilot devices ─────────────────────────────────────────────────────
     try {
-        $allAutoPilot = Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -ErrorAction Stop
-        $userAutoPilot = $allAutoPilot | Where-Object { $_.UserPrincipalName -eq $User.UserPrincipalName }
+        $allAutoPilot  = @(Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -ErrorAction Stop)
+        $userAutoPilot = @($allAutoPilot | Where-Object { $_.UserPrincipalName -eq $User.UserPrincipalName })
 
         if ($userAutoPilot.Count -gt 0) {
             Write-OffboardingLog -Message "Found $($userAutoPilot.Count) AutoPilot device(s)." -Level INFO
@@ -406,16 +406,16 @@ function Remove-UserGroupMemberships {
     Write-OffboardingLog -Message "STEP 6 — Removing group memberships for $($User.UserPrincipalName)" -Level STEP
 
     try {
-        $memberships = Get-MgUserMemberOf -UserId $User.Id -All -ErrorAction Stop
+        $memberships = @(Get-MgUserMemberOf -UserId $User.Id -All -ErrorAction Stop)
     }
     catch {
         Write-OffboardingLog -Message "Failed to retrieve group memberships: $_" -Level ERROR
         return
     }
 
-    $groups = $memberships | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.group' }
+    $groups = @($memberships | Where-Object { $_.AdditionalProperties['@odata.type'] -eq '#microsoft.graph.group' })
 
-    if (-not $groups -or $groups.Count -eq 0) {
+    if ($groups.Count -eq 0) {
         Write-OffboardingLog -Message "User has no group memberships." -Level INFO
         return
     }
