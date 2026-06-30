@@ -276,7 +276,7 @@ if ($choice -eq '3') {
 }
 
 $isWhatIf    = ($choice -eq '1')
-$skippedNums = $disabledSteps | ForEach-Object { [int]$_ }
+$skippedNums = @($disabledSteps | ForEach-Object { [int]$_ })
 
 # ── Call main script ──────────────────────────────────────────────────────────
 
