@@ -141,7 +141,7 @@ $selectedSteps = [ordered]@{}
 foreach ($key in $StepDefinitions.Keys) { $selectedSteps[$key] = $true }
 
 function Show-StepMenu {
-    param([ordered]$Steps, [ordered]$Selected)
+    param([System.Collections.Specialized.OrderedDictionary]$Steps, [System.Collections.Specialized.OrderedDictionary]$Selected)
     Write-Host ""
     foreach ($key in $Steps.Keys) {
         $tick  = if ($Selected[$key]) { '[X]' } else { '[ ]' }
