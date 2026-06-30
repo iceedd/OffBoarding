@@ -100,6 +100,9 @@ param(
     [ValidateRange(1, 6)]
     [int[]]$SkipSteps = @(),
 
+    # Set by Start-OffboardingMenu.ps1 when auth has already been done
+    [switch]$SkipConnect,
+
     [string]$ConfigPath = '.\Config\OffboardingConfig.psd1'
 )
 
@@ -153,7 +156,11 @@ Assert-RequiredModules -ModuleNames $Config.RequiredModules
 
 # ── Connect ───────────────────────────────────────────────────────────────────
 
-Connect-OffboardingServices -GraphScopes $Config.GraphScopes -TenantId $TenantId -WhatIf:$isWhatIf
+if (-not $SkipConnect) {
+    Connect-OffboardingServices -GraphScopes $Config.GraphScopes -TenantId $TenantId -WhatIf:$isWhatIf
+} else {
+    Write-OffboardingLog -Message "Using existing connection (authenticated via menu)." -Level INFO
+}
 
 # ── Resolve user ──────────────────────────────────────────────────────────────
 
