@@ -1,9 +1,12 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Automates the complete M365 user offboarding process for 2X.
+    Automates the complete M365 user offboarding process across any tenant.
 
 .DESCRIPTION
+    Designed for MSP/multi-tenant use. Prompts for an admin login on each run,
+    scoping all actions to whichever tenant that admin belongs to.
+
     Performs the following steps in order:
       1. Disables the user account in Entra ID and revokes all active sessions
       2. Converts the user's mailbox to a Shared Mailbox
@@ -14,7 +17,7 @@
          (dynamic membership groups are automatically skipped)
 
 .PARAMETER UserPrincipalName
-    UPN of the user to offboard (e.g. jsmith@2x.com).
+    UPN of the user to offboard (e.g. jsmith@clientA.com).
 
 .PARAMETER ForwardToManager
     When specified, incoming mail is also forwarded to the user's manager.
@@ -24,6 +27,20 @@
 .PARAMETER ManagerEmail
     Optional. Override the auto-resolved manager email. Use when the Entra
     manager attribute is missing or incorrect.
+
+.PARAMETER TenantId
+    Optional. The target tenant's ID or primary domain (e.g. clientA.onmicrosoft.com).
+    When provided, the login prompt goes directly to that tenant — no tenant
+    picker shown. Useful when running non-interactively or scripting across
+    multiple tenants in sequence.
+
+.PARAMETER CompanyName
+    Optional. The client's company name, used in Out-of-Office messages.
+    Overrides the default value in OffboardingConfig.psd1.
+
+.PARAMETER ITContactEmail
+    Optional. The IT helpdesk email shown in Out-of-Office messages.
+    Overrides the default value in OffboardingConfig.psd1.
 
 .PARAMETER WhatIf
     Runs every step in simulation mode — no changes are made.
@@ -39,16 +56,21 @@
 
 .EXAMPLE
     # Dry run — see what would happen without making any changes
-    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com -WhatIf
+    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com -WhatIf
 
 .EXAMPLE
-    # Full offboard, forwarding mail to manager
-    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com -ForwardToManager
+    # Full offboard for a specific client tenant, forwarding mail to manager
+    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com `
+        -ForwardToManager `
+        -CompanyName "Client A Ltd" `
+        -ITContactEmail "helpdesk@clientA.com"
 
 .EXAMPLE
-    # Full offboard with explicit manager override, skip license step
-    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@2x.com `
-        -ManagerEmail ceo@2x.com `
+    # Skip the login picker by specifying the tenant, skip license step
+    .\Invoke-UserOffboarding.ps1 -UserPrincipalName jsmith@clientA.com `
+        -TenantId "clientA.onmicrosoft.com" `
+        -CompanyName "Client A Ltd" `
+        -ITContactEmail "helpdesk@clientA.com" `
         -SkipSteps @(4)
 
 .NOTES
@@ -67,6 +89,13 @@ param(
 
     [ValidatePattern('^[^@]+@[^@]+\.[^@]+$')]
     [string]$ManagerEmail,
+
+    [string]$TenantId,
+
+    [string]$CompanyName,
+
+    [ValidatePattern('^[^@]+@[^@]+\.[^@]+$')]
+    [string]$ITContactEmail,
 
     [ValidateRange(1, 6)]
     [int[]]$SkipSteps = @(),
@@ -95,13 +124,20 @@ if (-not (Test-Path $resolvedConfig)) {
 }
 $Config = Import-PowerShellDataFile -Path $resolvedConfig
 
+# ── Apply runtime overrides to config ─────────────────────────────────────────
+
+if ($PSBoundParameters.ContainsKey('CompanyName'))   { $Config['CompanyName']    = $CompanyName   }
+if ($PSBoundParameters.ContainsKey('ITContactEmail')) { $Config['ITContactEmail'] = $ITContactEmail }
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 $logDir = Join-Path $scriptRoot $Config.LogDirectory.TrimStart('.').TrimStart('\').TrimStart('/')
 Initialize-OffboardingLog -LogDirectory $logDir -UserPrincipalName $UserPrincipalName
 
-Write-OffboardingLog -Message "=== 2X User Offboarding Started ===" -Level STEP
+Write-OffboardingLog -Message "=== User Offboarding Started ===" -Level STEP
 Write-OffboardingLog -Message "Target user  : $UserPrincipalName" -Level INFO
+Write-OffboardingLog -Message "Client       : $($Config.CompanyName)" -Level INFO
+Write-OffboardingLog -Message "Tenant       : $(if ($TenantId) { $TenantId } else { 'resolved via login' })" -Level INFO
 Write-OffboardingLog -Message "Forward mail : $ForwardToManager" -Level INFO
 Write-OffboardingLog -Message "WhatIf mode  : $($PSBoundParameters.ContainsKey('WhatIf') -or $WhatIfPreference)" -Level INFO
 if ($SkipSteps.Count -gt 0) {
@@ -117,7 +153,7 @@ Assert-RequiredModules -ModuleNames $Config.RequiredModules
 
 # ── Connect ───────────────────────────────────────────────────────────────────
 
-Connect-OffboardingServices -GraphScopes $Config.GraphScopes -WhatIf:$isWhatIf
+Connect-OffboardingServices -GraphScopes $Config.GraphScopes -TenantId $TenantId -WhatIf:$isWhatIf
 
 # ── Resolve user ──────────────────────────────────────────────────────────────
 
@@ -253,6 +289,8 @@ Write-OffboardingSummary `
     -UserPrincipalName $UserPrincipalName `
     -DisplayName       $mgUser.DisplayName `
     -ManagerEmail      $resolvedManagerEmail `
+    -CompanyName       $Config.CompanyName `
+    -TenantId          $TenantId `
     -ForwardToManager:$ForwardToManager `
     -WhatIf:$isWhatIf `
     -StartTime         $StartTime

@@ -76,16 +76,20 @@ function Connect-OffboardingServices {
     [CmdletBinding()]
     param(
         [string[]]$GraphScopes,
+        [string]$TenantId,
         [switch]$WhatIf
     )
     if ($WhatIf) {
-        Write-OffboardingLog -Message "[WHATIF] Would connect to Microsoft Graph and Exchange Online." -Level INFO
+        $tenantMsg = if ($TenantId) { " (tenant: $TenantId)" } else { ' (tenant: resolved via login)' }
+        Write-OffboardingLog -Message "[WHATIF] Would connect to Microsoft Graph and Exchange Online$tenantMsg." -Level INFO
         return
     }
 
     Write-OffboardingLog -Message "Connecting to Microsoft Graph..." -Level STEP
     try {
-        Connect-MgGraph -Scopes $GraphScopes -NoWelcome -ErrorAction Stop
+        $mgParams = @{ Scopes = $GraphScopes; NoWelcome = $true; ErrorAction = 'Stop' }
+        if ($TenantId) { $mgParams['TenantId'] = $TenantId }
+        Connect-MgGraph @mgParams
         Write-OffboardingLog -Message "Connected to Microsoft Graph." -Level SUCCESS
     }
     catch {
@@ -95,7 +99,9 @@ function Connect-OffboardingServices {
 
     Write-OffboardingLog -Message "Connecting to Exchange Online..." -Level STEP
     try {
-        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        $exoParams = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+        if ($TenantId) { $exoParams['Organization'] = $TenantId }
+        Connect-ExchangeOnline @exoParams
         Write-OffboardingLog -Message "Connected to Exchange Online." -Level SUCCESS
     }
     catch {
@@ -474,19 +480,25 @@ function Write-OffboardingSummary {
         [Parameter(Mandatory)][string]$UserPrincipalName,
         [Parameter(Mandatory)][string]$DisplayName,
         [string]$ManagerEmail,
+        [string]$CompanyName,
+        [string]$TenantId,
         [switch]$ForwardToManager,
         [switch]$WhatIf,
         [DateTime]$StartTime
     )
 
-    $elapsed = (Get-Date) - $StartTime
-    $mode    = if ($WhatIf) { 'WHATIF (dry run)' } else { 'LIVE' }
+    $elapsed    = (Get-Date) - $StartTime
+    $mode       = if ($WhatIf) { 'WHATIF (dry run)' } else { 'LIVE' }
+    $tenantLine = if ($TenantId) { $TenantId } else { 'resolved via login' }
+    $clientLine = if ($CompanyName) { $CompanyName } else { '(not specified)' }
 
     $summary = @"
 
 ╔══════════════════════════════════════════════════════════════╗
-║            2X OFFBOARDING COMPLETE — $mode
+║              OFFBOARDING COMPLETE — $mode
 ╠══════════════════════════════════════════════════════════════╣
+  Client       : $clientLine
+  Tenant       : $tenantLine
   User         : $DisplayName ($UserPrincipalName)
   Manager      : $(if ($ManagerEmail) { $ManagerEmail } else { 'Not specified' })
   Mail Forward : $(if ($ForwardToManager -and $ManagerEmail) { "→ $ManagerEmail" } else { 'Disabled' })
